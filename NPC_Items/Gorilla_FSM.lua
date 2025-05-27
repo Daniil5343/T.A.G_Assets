@@ -70,14 +70,14 @@ function locateEnemy(GorillaRoot: BasePart) --Model, Num
 		local root = chara.PrimaryPart
 		 local rootDist = (root.Position - GorillaRoot.Position).Magnitude
 		 if rootDist <= 50 then	
-			warn("Player Within visible distance.")
+			--warn("Player Within visible distance.")
 			distTable[root.Parent] = rootDist
 		end
 	end
 	for enemy, mag in distTable do 
 		if mag <= dist then 
 			dist = mag
-			print("ENEMY:", enemy)
+			--print("ENEMY:", enemy)
 			nearestEnemy = enemy
 		end
 	end
@@ -88,6 +88,10 @@ function distanceCheck(GorillaRoot: BasePart,enemyRoot: BasePart)
 		return (enemyRoot.Position - GorillaRoot.Position).Magnitude
 end
 
+function directMove(GorillaRoot: BasePart, position: Vector3)
+	GorillaRoot.Parent.Humanoid:MoveTo(position)
+end
+
 function moveTowards(GorillaRoot,enemyModel)
 		warn("ENEMY MODEL?:", enemyModel)
 		local enemyRoot = enemyModel.HumanoidRootPart
@@ -96,6 +100,11 @@ function moveTowards(GorillaRoot,enemyModel)
 		local runAnimation: AnimationTrack = GorillaRoot.Parent.Humanoid.Animator:LoadAnimation(repStorage.GorillaAnims.Actions.gorillaPhase1_run)
 		runAnimation.Priority = Enum.AnimationPriority.Movement
 		
+		local ATTACK_DISTANCE = 9
+		local TIMEOUT_POINT = 3
+		local RECALCULATE_DIST = 15
+		local pathTargetPos = enemyRoot.Position
+		
 		local chargePath = pathFindingSRVC:CreatePath({AgentHeight = 8})
 		local success, err = pcall(function()
 			chargePath:ComputeAsync(GorillaRoot.Position, enemyModel.HumanoidRootPart.Position)
@@ -103,46 +112,71 @@ function moveTowards(GorillaRoot,enemyModel)
 		
 		local waypoints 
 		
-		if distanceCheck(GorillaRoot, enemyModel.HumanoidRootPart) < 10 then
-			directMove(GorillaRoot,enemyRoot.Position)
-			return "Attacking"
-		end
-		
-		if success then 
+		if success and chargePath.Status == Enum.PathStatus.Success then
 			waypoints = chargePath:GetWaypoints()
 			local animTracks = gorillaAnim:GetPlayingAnimationTracks() 
-			for i, v in animTracks do 
-				if v.Name == "gorillaPhase1_run" then
-					v:Stop()
+				for i, v in animTracks do 
+					if v.Name == "gorillaPhase1_run" then
+						v:Stop()
+						end
+					end
+		warn("Path Created with:", waypoints, "waypoints.")
+		else
+			warn("--PATH FAILURE, ATTEMPTIND DIRECT MOVE")
+			directMove(GorillaRoot, pathTargetPos)
+			task.wait(.5)
+			return "Charging"
+		end
+		
+		if #waypoints < 3 then 
+			warn("Calculated path too short. Directly moving.")
+			directMove(GorillaRoot, pathTargetPos)
+			task.wait(.5)
+			return "Charging"
+		end
+		
+		runAnimation:Play()
+		
+		for i = 1, #waypoints do --1 is always starting.
+			warn("WayPoint:", i)
+			warn("Moving")
+			local point = waypoints[i]
+			
+			local timeWaited = 0
+			
+			while (GorillaRoot.Position - point.Position).Magnitude > 7 and timeWaited < TIMEOUT_POINT do 
+				local currentEnemy, currentDist = locateEnemy(GorillaRoot)
+				
+				if not currentEnemy then
+					runAnimation:Stop()
+					return "Idle"
 				end
+				
+				if currentDist <= ATTACK_DISTANCE then
+					gorillaHum:MoveTo(GorillaRoot.Position)
+					runAnimation:Stop()
+					return "Attacking"
+				end
+				
+				if (currentEnemy.HumanoidRootPart.Position - pathTargetPos).Magnitude > RECALCULATE_DIST then
+					warn("Target strayed too far from path. new path needed.")
+					runAnimation:Stop()
+					return "Charging"
+				end
+				
+			task.wait(.1) -- so the loop doesn't explode on us
+			TIMEOUT_POINT += .1
+			
+			if timeWaited > TIMEOUT_POINT then
+					warn("Path took too long or got stuck, recalculating.")
+					runAnimation:Stop()
+					return "Charging"
 			end
 			
-			runAnimation:Play()
-			for i, point in  waypoints do
-				if distanceCheck(GorillaRoot, enemyRoot) < 9 then
-					directMove(GorillaRoot, enemyRoot.Position)
-					runAnimation:Stop()
-					return
-				end
-				
-				gorillaHum:MoveTo(point.Position)
-				
-				gorillaHum.MoveToFinished:Wait()
-				
-				if waypoints[i+1] == nil then 
-					runAnimation:Stop()
-				end
-				warn("Waypoint success")
 			end
-		else
-			warn("PATH FAILED TO CALCULATE FROM", GorillaRoot.Parent, "to", enemyRoot.Parent)
-		end--Pathfinding or Unit MoveTo | BOTH? | yes b/c If player moves too far it becomes naught.
-		 --return true
-end
-
-function directMove(GorillaRoot: BasePart, position: Vector3)
-	GorillaRoot.Parent.Humanoid:MoveTo(position)
-end
+		end
+		
+end--Pathfinding or Unit MoveTo | BOTH? | yes b/c If player moves too far it becomes naught.
 
 function idleMovement(GorillaRoot: BasePart)--Load animations in state?
 	local randX = math.random(GorillaRoot.Position.X-15,GorillaRoot.Position.X+15)
@@ -197,10 +231,8 @@ function chargingState_Action(GorillaRoot: BasePart)
 	if moveResult == "Attacking" then
 		return "Attacking"
 	end
-	
-	if  locateEnemy(GorillaRoot) then 
-		return "Charging"
-	end
+
+	return "Idle"
 end
 
 function attackState_Action(GorillaRoot: BasePart)
@@ -345,27 +377,3 @@ gorillaFSM:Begin()
 --Start
 
 return control
-
---function control:Goto(state_name: string) --We'll return a goto next state here.
---	local old_state_name = self.currentState
---	local old_state: stateType = self.states[old_state_name]
---	local next_state: stateType = self.states[state_name]
-
---	if not next_state then return end 
-
---	local valid = true 
---	if next_state.Enter then --Enter function to determine valid-transition.
---		valid = next_state.Enter(old_state_name)
---	end
-
---	if valid then
---		self.currentState = state_name
-
---		if old_state.Completed then
---			old_state.Completed()	
---		end
---	else
---		self.currentState = old_state_name
---		warn("Failed transition.")
---	end
---end
