@@ -259,12 +259,17 @@ end
 function rushState_Action(GorillaRoot: BasePart)
 	local enemyModel, dist = locateEnemy(GorillaRoot)
 	local GorillaHum = GorillaRoot.Parent.Humanoid :: Humanoid
+	local GorillaAnimator = GorillaHum.Animator :: Animator
 	GorillaHum.WalkSpeed = 32
+	
+	local runAnimation: AnimationTrack = GorillaAnimator:LoadAnimation(gorillaP1_Run)
+	runAnimation.Priority = Enum.AnimationPriority.Movement
 	
 	if dist <= 5 then
 		return "Attacking"
 	end
 	
+	runAnimation:Play()
 	while dist < 25 and enemyModel and enemyModel.Humanoid.Health > 0 do 
 		enemyModel, dist = locateEnemy(GorillaRoot)
 		GorillaHum:MoveTo(enemyModel.PrimaryPart.Position)
@@ -272,13 +277,16 @@ function rushState_Action(GorillaRoot: BasePart)
 		enemyModel, dist = locateEnemy(GorillaRoot)
 		if dist < 5 then
 			GorillaHum.WalkSpeed = 20
+			runAnimation:Stop()
 			return "Attacking"
 		end
 	end
 	
 	if locateEnemy(GorillaRoot) then 
+		runAnimation:Stop()
 		return "Charging"
 	else
+		runAnimation:Stop()
 		return "Idle"
 	end
 end
@@ -346,7 +354,6 @@ function control.create_StateMachine(NPC)
 		animator = NPC.Humanoid.Animator;
 		states = {}; --Given States
 		currentState = nil :: string?;
-		stateComplete  = true;
 		
 		lastRangeTime = nil;
 		lastPunchTime = nil;
@@ -393,22 +400,19 @@ end
 function control:Begin()
 		self.stateThread = task.spawn(function()
 			while task.wait(.01) do 
-				if not self.stateComplete then return end 
-				self.stateComplete = false
 			--	warn("--PERFORMING STATE ACTION:")
 				
-				local nextState = self.states[self.currentState].StateAction(self.root)--Now we yield.
+					local nextState = self.states[self.currentState].StateAction(self.root)--Now we yield.
 				
-				if not nextState then 
+					if not nextState then 
 			--		warn("--STATE ACTION ERROR, DEFAULTING--")
-					nextState = self.currentState
-				end
+						nextState = self.currentState
+					end
 			
-				warn("TRANSITIONED FROM:", self.currentState, "to", nextState)
-				self.currentState = nextState
-				self.stateComplete = true
-			end	
-		end)
+					warn("TRANSITIONED FROM:", self.currentState, "to", nextState)
+					self.currentState = nextState
+				end	
+			end)
 end
 
 function control:Stop()
